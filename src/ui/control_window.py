@@ -42,7 +42,7 @@ class ControlWindow:
         self.queue = queue.Queue()
         
         # 주기적으로 큐 확인 및 UI 업데이트
-        self.queue_check_interval = 50 # ms
+        self.queue_check_interval = 15 # ms (약 66 FPS 목표)
         self.check_queue()
         
         # 초기 설정 로드
@@ -216,28 +216,36 @@ class ControlWindow:
             self.show_monitor_button.config(text="Hide Monitor")
 
     def check_queue(self):
-        """주기적으로 큐를 확인하여 MonitorWindow 업데이트"""
+        """주기적으로 큐를 확인하여 MonitorWindow 업데이트 (최신 데이터만 처리)"""
+        latest_data = None
         try:
+            # 큐에 있는 모든 아이템을 꺼내서 마지막 아이템만 사용
             while not self.queue.empty():
                 data = self.queue.get_nowait()
-                if data is None: # 종료 신호
-                    return 
-                
-                original, mask, bbox, hsv_ranges = data
-                
+                if data is None: # 종료 신호 처리
+                    # 필요한 종료 로직 수행 (예: 플래그 설정)
+                    return # 큐 처리 중단
+                latest_data = data # 마지막 데이터 저장
+                    
+        except queue.Empty:
+            pass # 이미 비어있으면 무시
+        except Exception as e:
+             print(f"Error reading queue: {e}")
+
+        # 최신 데이터가 있으면 UI 업데이트
+        if latest_data:
+            try:
+                original, mask, bbox, hsv_ranges = latest_data
                 # MonitorWindow가 존재하고 보이면 업데이트
                 if self.monitor_window and self.monitor_window.winfo_exists() and self.monitor_window.winfo_viewable():
                     self.monitor_window.update_frame(original, mask, bbox)
                     self.monitor_window.update_hsv_range(*hsv_ranges)
-                    
-        except queue.Empty:
-            pass # 큐가 비어있으면 아무것도 안 함
-        except Exception as e:
-             print(f"Error processing queue: {e}")
-        finally:
-            # 다음 큐 확인 예약
-            if hasattr(self, 'root') and self.root.winfo_exists(): # 루트 윈도우 존재 확인
-                 self.root.after(self.queue_check_interval, self.check_queue)
+            except Exception as e:
+                 print(f"Error updating UI from queue data: {e}")
+                 
+        # 다음 큐 확인 예약 (try 블록 밖에 위치해야 함)
+        if hasattr(self, 'root') and self.root.winfo_exists():
+             self.root.after(self.queue_check_interval, self.check_queue)
 
     def on_closing(self):
         """창 닫기 버튼 클릭 시 호출될 함수"""

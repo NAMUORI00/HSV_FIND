@@ -57,14 +57,14 @@ def main():
                     # 큐가 가득 차면 이전 데이터 무시 (선택적)
                     pass 
                     
-                time.sleep(0.01) # CPU 사용률 제어
+                # time.sleep(0.01) # 제거: CPU 사용률 제어 대신 다른 방식 사용 또는 불필요
 
             except Exception as e:
                 if not exit_flag: # 종료 중이 아닐 때만 오류 출력
                      print(f"Error in update_monitor_thread: {e}")
                      # 필요한 경우 여기서 스레드 종료 처리
                      # exit_flag = True 
-                time.sleep(0.1) 
+                time.sleep(0.1) # 오류 발생 시에는 잠시 대기
         print("Update monitor thread finished.")
 
     # 모니터링 스레드 시작
