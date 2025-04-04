@@ -31,6 +31,16 @@ def main():
     def update_monitor_thread():
         """화면 캡처 및 객체 검출 스레드 함수"""
         while not exit_flag:
+            # === 모드 확인 ===
+            current_mode = control_window.monitoring_mode.get()
+            if current_mode == "static":
+                # 정적 모드일 때는 스레드가 할 일이 없음 (CPU 점유 방지 위해 짧은 sleep)
+                # sleep 대신 Event 사용 등으로 개선 가능
+                time.sleep(0.1) 
+                continue # 루프 다음 반복으로
+            # ================
+                
+            # === 실시간 모드 처리 ===
             try:
                 frame = screen_capture.capture()
                 if frame is None:
@@ -50,21 +60,20 @@ def main():
                     (detector.lower_color[2], detector.upper_color[2])
                 )
                 
-                # 데이터를 큐에 넣음 (UI 스레드에서 처리)
+                # 데이터를 큐에 넣음
                 try:
                     data_queue.put_nowait((original_frame, mask_image, bbox_frame, hsv_ranges))
                 except queue.Full:
-                    # 큐가 가득 차면 이전 데이터 무시 (선택적)
                     pass 
                     
-                # time.sleep(0.01) # 제거: CPU 사용률 제어 대신 다른 방식 사용 또는 불필요
+                # time.sleep(0.01) # 실시간 처리를 위해 제거됨
 
             except Exception as e:
-                if not exit_flag: # 종료 중이 아닐 때만 오류 출력
-                     print(f"Error in update_monitor_thread: {e}")
-                     # 필요한 경우 여기서 스레드 종료 처리
-                     # exit_flag = True 
-                time.sleep(0.1) # 오류 발생 시에는 잠시 대기
+                if not exit_flag:
+                     print(f"Error in update_monitor_thread (realtime): {e}")
+                time.sleep(0.1) 
+            # ===================
+            
         print("Update monitor thread finished.")
 
     # 모니터링 스레드 시작

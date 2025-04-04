@@ -20,14 +20,22 @@ class ControlWindow:
             screen_capture: 화면 캡처 객체
             detector: 객체 검출기
         """
+        # 루트 윈도우 먼저 생성!
+        self.root = tk.Tk()
+        
         self.screen_capture = screen_capture
         self.detector = detector
         
         # 모니터 목록 가져오기
         self.monitors = screen_capture.get_monitors()
         
-        # UI 초기화
-        self.root = tk.Tk()
+        # === 모드 상태 변수 ===
+        self.monitoring_mode = tk.StringVar(value="realtime") # 이제 오류 발생 안 함
+        self.static_image = None
+        self.static_update_timer = None # 디바운싱 타이머 ID
+        # ====================
+        
+        # UI 초기화 (루트 윈도우 생성 후 호출)
         self.init_ui()
         
         # MonitorWindow 생성 (Toplevel)
@@ -71,6 +79,20 @@ class ControlWindow:
         monitor_combo.pack(side='left', fill='x', expand=True, padx=5)
         monitor_combo.bind('<<ComboboxSelected>>', self.on_monitor_changed)
         
+        # === 모드 선택 라디오 버튼 ===
+        mode_frame = ttk.LabelFrame(self.root, text="Monitoring Mode")
+        mode_frame.pack(fill='x', padx=10, pady=5)
+        
+        ttk.Radiobutton(mode_frame, text="Real-time", variable=self.monitoring_mode, 
+                        value="realtime", command=self.on_mode_changed).pack(side='left', padx=10)
+        ttk.Radiobutton(mode_frame, text="Static Image", variable=self.monitoring_mode, 
+                        value="static", command=self.on_mode_changed).pack(side='left', padx=10)
+        
+        self.capture_button = ttk.Button(mode_frame, text="Capture Static Image", 
+                                          command=self.capture_static_image, state='disabled')
+        self.capture_button.pack(side='left', padx=10)
+        # ==========================
+        
         # --- HSV 슬라이더 --- 
         hsv_frame = ttk.LabelFrame(self.root, text='HSV Controls')
         hsv_frame.pack(fill='x', padx=10, pady=5)
@@ -113,6 +135,12 @@ class ControlWindow:
         ttk.Button(button_frame, text="Load Settings", command=self.load_settings).pack(side='left', expand=True, padx=5)
         ttk.Button(button_frame, text="Save Settings", command=self.save_settings).pack(side='left', expand=True, padx=5)
         
+        # --- 모니터링 윈도우 버튼 --- 
+        # ... 기존 코드 ...
+        
+        # 초기 모드 상태에 따른 UI 설정
+        self.on_mode_changed() 
+        
     def on_monitor_changed(self, event):
         """모니터 선택 변경 이벤트"""
         try:
@@ -121,8 +149,68 @@ class ControlWindow:
         except tk.TclError: # 위젯이 파괴된 경우 등 예외 처리
             pass 
             
+    def on_mode_changed(self):
+        """모니터링 모드 변경 시 호출"""
+        mode = self.monitoring_mode.get()
+        if mode == "static":
+            self.capture_button.config(state='normal')
+            print("Switched to Static Image mode.")
+            # TODO: 실시간 스레드 일시 중지 또는 큐 전송 중단 신호
+            # (main.py에서 이 모드를 확인하도록 함)
+        else: # realtime
+            self.capture_button.config(state='disabled')
+            self.static_image = None # 실시간 모드로 전환 시 정적 이미지 초기화
+            print("Switched to Real-time mode.")
+            # TODO: 실시간 스레드 재개 또는 큐 전송 재개 신호
+            # (main.py에서 이 모드를 확인하도록 함)
+            # MonitorWindow 내용 초기화 (선택적)
+            # if self.monitor_window and self.monitor_window.winfo_exists():
+            #     self.monitor_window.clear_canvas() # 이런 메서드 추가 필요
+                
+    def capture_static_image(self):
+        """정적 이미지 캡처 버튼 클릭 시"""
+        if self.monitoring_mode.get() == "static":
+            print("Capturing static image...")
+            self.static_image = self.screen_capture.capture()
+            if self.static_image is not None:
+                print("Static image captured.")
+                # 즉시 처리 및 업데이트
+                self.process_and_update_static() 
+            else:
+                print("Failed to capture static image.")
+
+    def process_and_update_static(self):
+        """현재 설정으로 정적 이미지 처리 및 MonitorWindow 업데이트"""
+        if self.static_image is None or self.monitoring_mode.get() != "static":
+            return
+            
+        if not self.monitor_window or not self.monitor_window.winfo_exists():
+             return # 모니터 창이 없으면 중단
+
+        try:
+             print("Processing static image with current HSV settings...")
+             result = self.detector.detect(self.static_image.copy()) # 원본 유지 위해 복사본 사용
+             original_frame = self.static_image
+             mask_image = result['mask']
+             bbox_frame = result['bbox_frame']
+             
+             hsv_ranges = (
+                 (self.detector.lower_color[0], self.detector.upper_color[0]),
+                 (self.detector.lower_color[1], self.detector.upper_color[1]),
+                 (self.detector.lower_color[2], self.detector.upper_color[2])
+             )
+             
+             # MonitorWindow 업데이트 (메인 스레드이므로 직접 호출)
+             if self.monitor_window.winfo_viewable(): # 보이는 경우에만 업데이트
+                  self.monitor_window.update_frame(original_frame, mask_image, bbox_frame)
+                  self.monitor_window.update_hsv_range(*hsv_ranges)
+             print("Monitor updated with static image processing result.")
+             
+        except Exception as e:
+             print(f"Error processing or updating static image: {e}")
+
     def on_slider_changed(self, *args):
-        """슬라이더 값 변경 이벤트"""
+        """슬라이더 값 변경 이벤트 (디바운싱 적용)"""
         # 최소값이 최대값보다 커지는 것 방지
         if self.hue_min.get() > self.hue_max.get():
             self.hue_min.set(self.hue_max.get())
@@ -131,16 +219,28 @@ class ControlWindow:
         if self.val_min.get() > self.val_max.get():
             self.val_min.set(self.val_max.get())
             
-        # HSV 범위 업데이트
+        # HSV 범위 업데이트 (탐지기) - 즉시 반영
         self.detector.set_hsv_range(
             self.hue_min.get(), self.hue_max.get(),
             self.sat_min.get(), self.sat_max.get(),
             self.val_min.get(), self.val_max.get()
         )
         
-        # HSV 값 표시 업데이트
+        # HSV 값 표시 업데이트 - 즉시 반영
         self.update_hsv_label()
         
+        # 정적 모드일 경우, 정적 이미지 업데이트 디바운싱
+        if self.monitoring_mode.get() == "static":
+            # 기존 타이머 취소
+            if self.static_update_timer:
+                try:
+                    self.root.after_cancel(self.static_update_timer)
+                except tk.TclError:
+                    pass # 타이머가 이미 만료되었거나 root가 파괴 중일 수 있음
+            
+            # 새 타이머 설정 (250ms 후 처리)
+            self.static_update_timer = self.root.after(250, self.process_and_update_static)
+            
     def update_hsv_label(self):
          """HSV 레이블 업데이트"""
          self.hsv_label.config(
@@ -216,7 +316,14 @@ class ControlWindow:
             self.show_monitor_button.config(text="Hide Monitor")
 
     def check_queue(self):
-        """주기적으로 큐를 확인하여 MonitorWindow 업데이트 (최신 데이터만 처리)"""
+        """주기적으로 큐를 확인하여 MonitorWindow 업데이트 (실시간 모드 전용)"""
+        # 실시간 모드가 아니면 큐 처리 안함
+        if self.monitoring_mode.get() != "realtime":
+            # 다음 큐 확인 예약은 계속 함 (모드 변경 감지 위해)
+            if hasattr(self, 'root') and self.root.winfo_exists():
+                self.root.after(self.queue_check_interval, self.check_queue)
+            return
+            
         latest_data = None
         try:
             # 큐에 있는 모든 아이템을 꺼내서 마지막 아이템만 사용
@@ -232,7 +339,7 @@ class ControlWindow:
         except Exception as e:
              print(f"Error reading queue: {e}")
 
-        # 최신 데이터가 있으면 UI 업데이트
+        # 최신 데이터가 있으면 UI 업데이트 (실시간 모드)
         if latest_data:
             try:
                 original, mask, bbox, hsv_ranges = latest_data
@@ -243,7 +350,7 @@ class ControlWindow:
             except Exception as e:
                  print(f"Error updating UI from queue data: {e}")
                  
-        # 다음 큐 확인 예약 (try 블록 밖에 위치해야 함)
+        # 다음 큐 확인 예약
         if hasattr(self, 'root') and self.root.winfo_exists():
              self.root.after(self.queue_check_interval, self.check_queue)
 
@@ -251,6 +358,13 @@ class ControlWindow:
         """창 닫기 버튼 클릭 시 호출될 함수"""
         print("Control window closing...")
         
+        # 예약된 정적 업데이트 타이머 취소
+        if self.static_update_timer:
+            try:
+                self.root.after_cancel(self.static_update_timer)
+            except tk.TclError:
+                pass
+                
         # main.py의 exit_flag 설정
         try:
              main_module = sys.modules['__main__']
@@ -280,6 +394,15 @@ class ControlWindow:
         finally:
              # mainloop 종료 후 최종 정리
              print("Main loop finished in ControlWindow. Cleaning up...")
+             
+             # 예약된 정적 업데이트 타이머 취소
+             if self.static_update_timer:
+                 try:
+                     if hasattr(self, 'root') and self.root.winfo_exists():
+                          self.root.after_cancel(self.static_update_timer)
+                 except tk.TclError:
+                     pass
+                     
              # Monitor 윈도우가 아직 존재하면 확실히 닫기
              if self.monitor_window and self.monitor_window.winfo_exists():
                  self.monitor_window.destroy()
