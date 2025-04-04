@@ -1,71 +1,104 @@
 """
-HSV 기반 객체 탐지 프로그램 메인 스크립트
+HSV 기반 객체 탐지 프로그램
 """
 
-import cv2
-import numpy as np
+import sys
+import threading
+import tkinter as tk
+import time
+import queue
 from src.capture.screen_capture import ScreenCapture
-from src.detection.hsv_detector import HSVDetector
 from src.ui.control_window import ControlWindow
+from src.detection.custom_detector import CustomDetector
 
-def draw_objects(frame, detected_objects):
-    """감지된 객체를 프레임에 표시"""
-    for obj in detected_objects:
-        x, y, w, h = obj['x'], obj['y'], obj['width'], obj['height']
-        # 경계 상자 그리기
-        cv2.rectangle(frame, (x, y), (x + w, y + h), (0, 255, 0), 2)
-        # 면적 표시
-        cv2.putText(frame, f'Area: {int(obj["area"])}', (x, y - 10),
-                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
+# 종료 플래그
+exit_flag = False
 
 def main():
-    # 화면 캡처 객체 초기화
-    screen_capture = ScreenCapture(capture_size=(320, 320))
+    """메인 함수"""
+    global exit_flag
     
-    # 사용 가능한 모니터 수 확인
-    monitors = screen_capture.get_monitors()
-    monitor_count = len(monitors)
+    # 화면 캡처 객체 생성
+    screen_capture = ScreenCapture()
     
-    # 객체 초기화
-    hsv_detector = HSVDetector()
-    control_window = ControlWindow(monitor_count=monitor_count)
+    # 객체 검출기 생성
+    detector = CustomDetector()
     
-    # 모니터 정보 출력
-    print(f"Available Monitors: {monitor_count}")
-    for i, monitor in enumerate(monitors, 1):
-        print(f"Monitor {i}: {monitor['width']}x{monitor['height']}")
+    # 컨트롤 윈도우 생성 (루트 Tk 객체 및 큐 포함)
+    control_window = ControlWindow(screen_capture, detector)
+    data_queue = control_window.queue # 컨트롤 윈도우의 큐 참조
     
-    try:
-        while True:
-            # 선택된 모니터 업데이트
-            selected_monitor = control_window.get_selected_monitor()
-            if screen_capture.select_monitor(selected_monitor):
-                # 화면 캡처
+    def update_monitor_thread():
+        """화면 캡처 및 객체 검출 스레드 함수"""
+        while not exit_flag:
+            try:
                 frame = screen_capture.capture()
+                if frame is None:
+                    time.sleep(0.01) 
+                    continue
                 
-                # HSV 범위 업데이트
-                hsv_range = control_window.get_hsv_range()
-                hsv_detector.set_hsv_range(hsv_range)
+                result = detector.detect(frame)
                 
-                # 객체 탐지
-                result = hsv_detector.detect(frame)
+                original_frame = frame 
+                mask_image = result['mask']
+                bbox_frame = result['bbox_frame']
                 
-                # 결과 표시
-                draw_objects(frame, result['objects'])
+                # 현재 HSV 범위 가져오기
+                hsv_ranges = (
+                    (detector.lower_color[0], detector.upper_color[0]),
+                    (detector.lower_color[1], detector.upper_color[1]),
+                    (detector.lower_color[2], detector.upper_color[2])
+                )
                 
-                # 창 표시
-                cv2.imshow('Original', frame)
-                cv2.imshow('Mask', result['mask'])
-                cv2.imshow('Result', cv2.bitwise_and(frame, frame, mask=result['mask']))
-            
-            # 'q' 키를 누르면 종료
-            if cv2.waitKey(1) & 0xFF == ord('q'):
-                break
-                
-    finally:
-        # 리소스 정리
-        cv2.destroyAllWindows()
-        control_window.destroy()
+                # 데이터를 큐에 넣음 (UI 스레드에서 처리)
+                try:
+                    data_queue.put_nowait((original_frame, mask_image, bbox_frame, hsv_ranges))
+                except queue.Full:
+                    # 큐가 가득 차면 이전 데이터 무시 (선택적)
+                    pass 
+                    
+                time.sleep(0.01) # CPU 사용률 제어
 
-if __name__ == '__main__':
+            except Exception as e:
+                if not exit_flag: # 종료 중이 아닐 때만 오류 출력
+                     print(f"Error in update_monitor_thread: {e}")
+                     # 필요한 경우 여기서 스레드 종료 처리
+                     # exit_flag = True 
+                time.sleep(0.1) 
+        print("Update monitor thread finished.")
+
+    # 모니터링 스레드 시작
+    monitor_thread = threading.Thread(target=update_monitor_thread, daemon=True)
+    monitor_thread.start()
+    
+    # 컨트롤 윈도우 시작 (Tkinter 메인 루프)
+    try:
+        print("Starting main application...")
+        control_window.start() # 메인 루프 시작
+    except KeyboardInterrupt:
+         print("KeyboardInterrupt caught. Initiating shutdown...")
+         exit_flag = True 
+    finally:
+        # --- 메인 루프 종료 후 처리 --- 
+        print("Main loop finished. Cleaning up application...")
+        if not exit_flag:
+            exit_flag = True 
+        
+        print("Signaling monitor thread to exit...")
+        # 큐에 종료 신호를 보내거나 exit_flag 확인으로 충분할 수 있음
+        try:
+             data_queue.put_nowait(None) # 큐 처리 루프 종료 신호
+        except queue.Full:
+             pass 
+             
+        print("Waiting for monitor thread to complete...")
+        monitor_thread.join(timeout=2.0) 
+        if monitor_thread.is_alive():
+             print("Warning: Monitor thread did not complete gracefully.")
+             
+        # ControlWindow의 start 메서드 finally 블록에서 Tk 윈도우 destroy 처리
+            
+        print("Application shutdown complete.")
+
+if __name__ == "__main__":
     main() 
