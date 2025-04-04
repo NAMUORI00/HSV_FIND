@@ -6,7 +6,7 @@ import cv2
 from ..detection.hsv_detector import HSVRange
 
 class ControlWindow:
-    def __init__(self, window_name="HSV 조정"):
+    def __init__(self, window_name="HSV Control"):
         """컨트롤 창 초기화"""
         self.window_name = window_name
         cv2.namedWindow(self.window_name)

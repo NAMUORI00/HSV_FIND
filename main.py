@@ -40,9 +40,9 @@ def main():
             draw_objects(frame, result['objects'])
             
             # 창 표시
-            cv2.imshow('원본', frame)
-            cv2.imshow('마스크', result['mask'])
-            cv2.imshow('결과', cv2.bitwise_and(frame, frame, mask=result['mask']))
+            cv2.imshow('Original', frame)
+            cv2.imshow('Mask', result['mask'])
+            cv2.imshow('Result', cv2.bitwise_and(frame, frame, mask=result['mask']))
             
             # 'q' 키를 누르면 종료
             if cv2.waitKey(1) & 0xFF == ord('q'):
