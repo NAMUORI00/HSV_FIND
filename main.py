@@ -19,30 +19,44 @@ def draw_objects(frame, detected_objects):
                     cv2.FONT_HERSHEY_SIMPLEX, 0.5, (0, 255, 0), 2)
 
 def main():
+    # 화면 캡처 객체 초기화
+    screen_capture = ScreenCapture(capture_size=(320, 320))
+    
+    # 사용 가능한 모니터 수 확인
+    monitors = screen_capture.get_monitors()
+    monitor_count = len(monitors)
+    
     # 객체 초기화
-    screen_capture = ScreenCapture()
     hsv_detector = HSVDetector()
-    control_window = ControlWindow()
+    control_window = ControlWindow(monitor_count=monitor_count)
+    
+    # 모니터 정보 출력
+    print(f"Available Monitors: {monitor_count}")
+    for i, monitor in enumerate(monitors, 1):
+        print(f"Monitor {i}: {monitor['width']}x{monitor['height']}")
     
     try:
         while True:
-            # 화면 캡처
-            frame = screen_capture.capture()
-            
-            # HSV 범위 업데이트
-            hsv_range = control_window.get_hsv_range()
-            hsv_detector.set_hsv_range(hsv_range)
-            
-            # 객체 탐지
-            result = hsv_detector.detect(frame)
-            
-            # 결과 표시
-            draw_objects(frame, result['objects'])
-            
-            # 창 표시
-            cv2.imshow('Original', frame)
-            cv2.imshow('Mask', result['mask'])
-            cv2.imshow('Result', cv2.bitwise_and(frame, frame, mask=result['mask']))
+            # 선택된 모니터 업데이트
+            selected_monitor = control_window.get_selected_monitor()
+            if screen_capture.select_monitor(selected_monitor):
+                # 화면 캡처
+                frame = screen_capture.capture()
+                
+                # HSV 범위 업데이트
+                hsv_range = control_window.get_hsv_range()
+                hsv_detector.set_hsv_range(hsv_range)
+                
+                # 객체 탐지
+                result = hsv_detector.detect(frame)
+                
+                # 결과 표시
+                draw_objects(frame, result['objects'])
+                
+                # 창 표시
+                cv2.imshow('Original', frame)
+                cv2.imshow('Mask', result['mask'])
+                cv2.imshow('Result', cv2.bitwise_and(frame, frame, mask=result['mask']))
             
             # 'q' 키를 누르면 종료
             if cv2.waitKey(1) & 0xFF == ord('q'):
