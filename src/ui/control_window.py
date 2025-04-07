@@ -32,7 +32,6 @@ class ControlWindow:
         # === 모드 상태 변수 ===
         self.monitoring_mode = tk.StringVar(value="realtime") # 이제 오류 발생 안 함
         self.static_image = None
-        self.static_update_timer = None # 디바운싱 타이머 ID
         # ====================
         
         # UI 초기화 (루트 윈도우 생성 후 호출)
@@ -210,7 +209,7 @@ class ControlWindow:
              print(f"Error processing or updating static image: {e}")
 
     def on_slider_changed(self, *args):
-        """슬라이더 값 변경 이벤트 (디바운싱 적용)"""
+        """슬라이더 값 변경 이벤트"""
         # 최소값이 최대값보다 커지는 것 방지
         if self.hue_min.get() > self.hue_max.get():
             self.hue_min.set(self.hue_max.get())
@@ -219,27 +218,19 @@ class ControlWindow:
         if self.val_min.get() > self.val_max.get():
             self.val_min.set(self.val_max.get())
             
-        # HSV 범위 업데이트 (탐지기) - 즉시 반영
+        # HSV 범위 업데이트 (탐지기)
         self.detector.set_hsv_range(
             self.hue_min.get(), self.hue_max.get(),
             self.sat_min.get(), self.sat_max.get(),
             self.val_min.get(), self.val_max.get()
         )
         
-        # HSV 값 표시 업데이트 - 즉시 반영
+        # HSV 값 표시 업데이트
         self.update_hsv_label()
         
-        # 정적 모드일 경우, 정적 이미지 업데이트 디바운싱
+        # 정적 모드일 경우, 정적 이미지 즉시 재처리 및 업데이트
         if self.monitoring_mode.get() == "static":
-            # 기존 타이머 취소
-            if self.static_update_timer:
-                try:
-                    self.root.after_cancel(self.static_update_timer)
-                except tk.TclError:
-                    pass # 타이머가 이미 만료되었거나 root가 파괴 중일 수 있음
-            
-            # 새 타이머 설정 (250ms 후 처리)
-            self.static_update_timer = self.root.after(250, self.process_and_update_static)
+            self.process_and_update_static()
             
     def update_hsv_label(self):
          """HSV 레이블 업데이트"""
@@ -358,13 +349,6 @@ class ControlWindow:
         """창 닫기 버튼 클릭 시 호출될 함수"""
         print("Control window closing...")
         
-        # 예약된 정적 업데이트 타이머 취소
-        if self.static_update_timer:
-            try:
-                self.root.after_cancel(self.static_update_timer)
-            except tk.TclError:
-                pass
-                
         # main.py의 exit_flag 설정
         try:
              main_module = sys.modules['__main__']
@@ -394,15 +378,6 @@ class ControlWindow:
         finally:
              # mainloop 종료 후 최종 정리
              print("Main loop finished in ControlWindow. Cleaning up...")
-             
-             # 예약된 정적 업데이트 타이머 취소
-             if self.static_update_timer:
-                 try:
-                     if hasattr(self, 'root') and self.root.winfo_exists():
-                          self.root.after_cancel(self.static_update_timer)
-                 except tk.TclError:
-                     pass
-                     
              # Monitor 윈도우가 아직 존재하면 확실히 닫기
              if self.monitor_window and self.monitor_window.winfo_exists():
                  self.monitor_window.destroy()
